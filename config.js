@@ -2,5 +2,5 @@
 // OJO: este archivo se publica con la app; quien lo lea puede leer/escribir los datos.
 const CONFIG = {
   url: 'https://script.google.com/macros/s/AKfycbx-oGcXqD5gpH_0oAsj63LdBG8LYfEnFIeYwI2yDejJQxlLB3LPemw2c8oR-vbrLEt24Q/exec',
-  clave: '' // <- pon aquí la misma CLAVE que tiene tu script
+  clave: '12345678' // <- pon aquí la misma CLAVE que tiene tu script
 };
