@@ -74,6 +74,7 @@ async function sync() {
 }
 setInterval(async () => {
   try {
+    if (modalAbierto()) return;
     const a = document.activeElement;
     if (a && /INPUT|SELECT/.test(a.tagName) && a.type !== 'file') return; // no interrumpir mientras escribe
     if (await sync()) render();
@@ -238,41 +239,65 @@ async function borrarLote(id) {
 function vVentas() {
   const con = lotesVivos().filter(l => disponibles(l.id) > 0);
   document.getElementById('view').innerHTML = `
-  <div class="card"><h2>Registrar venta</h2>
-  ${con.length ? `<div class="row">
-    <label>Boleto<select id="vl" onchange="cambiaLote()">${con.map(l => `<option value="${l.id}">${esc(l.artista)} — ${esc(l.zona)} (${disponibles(l.id)} disp.)</option>`).join('')}</select></label>
-    <label>Cantidad<input id="vq" type="number" min="1" value="1" oninput="calcVenta()"></label>
-    <label>Precio de venta (por boleto)<input id="vp" type="number" min="0" step="0.01" oninput="calcVenta()"></label>
-    <label>Fecha de venta<input id="vf" type="datetime-local" value="${nowLocal()}"></label>
-    <label>Vendido a / comentario (opcional)<input id="vc"></label>
-    <label>PDF (opcional)<input id="vpdf" type="file" accept="application/pdf"></label></div>
-    <button class="btn" onclick="vender()">Registrar venta</button> <b id="vtot" style="margin-left:12px"></b>`
-      : '<p class="mut">No hay boletos disponibles. Ingrésalos en la pestaña Boletos.</p>'}
-  </div>
+  <div class="card"><div class="head"><h2>Boletos disponibles</h2><button class="btn" onclick="abrirVenta()" ${con.length ? '' : 'disabled'}>Vender</button></div>
+  <table><tr><th>Artista</th><th>Zona</th><th>Disponibles</th><th>Precio sugerido</th><th></th></tr>
+  ${con.map(l => `<tr><td>${esc(l.artista)}</td><td>${esc(l.zona)}</td><td>${disponibles(l.id)}</td><td class="sug">${money(l.sugerido)}</td>
+    <td class="acts"><button class="btn sm" onclick="abrirVenta('${l.id}')">Vender</button></td></tr>`).join('') || '<tr><td colspan="5" class="mut">No hay boletos disponibles.</td></tr>'}</table></div>
   <div class="card"><h2>Historial de ventas</h2>
-  <table><tr><th>Fecha</th><th>Boleto</th><th>Cant.</th><th>Precio</th><th>Total</th>${user.rol === 'admin' ? '<th>Utilidad</th>' : ''}<th>Comentario</th><th></th></tr>
+  <table><tr><th>Fecha</th><th>Boleto</th><th>Cant.</th><th>Precio</th><th>Total</th>${user.rol === 'admin' ? '<th>Utilidad</th>' : ''}<th>Comentarios</th><th></th></tr>
   ${[...db.ventas].sort((a, b) => b.fecha.localeCompare(a.fecha)).map(v => {
     const l = lote(v.loteId);
     return `<tr><td>${fdate(v.fecha)}<br><span class="mut">${esc(nombreUser(v.vendedorId))}</span></td><td>${esc(l?.artista)}<br><span class="mut">${esc(l?.zona)}</span></td>
     <td>${v.cantidad}</td><td>${money(v.precio)}</td><td>${money(v.precio * v.cantidad)}</td>${user.rol === 'admin' ? `<td>${money((v.precio - (l?.costo ?? 0)) * v.cantidad)}</td>` : ''}<td>${esc(v.comentario)}</td>
     <td class="acts">${v.anulada ? '<span class="tag err">Anulada</span>' : `${pdfBtn(v.pdf)} ${user.rol === 'admin' ? `<button class="sec danger" onclick="anular('${v.id}')">Anular</button>` : ''}`}</td></tr>`;
   }).join('') || '<tr><td colspan="8" class="mut">Sin ventas</td></tr>'}</table></div>`;
-  if (con.length) cambiaLote();
 }
-function cambiaLote() { document.getElementById('vp').value = lote(val('vl')).sugerido; calcVenta(); }
+
+// ----- modal de venta -----
+const modalAbierto = () => document.getElementById('modal').classList.contains('show');
+function abrirVenta(id) {
+  const con = lotesVivos().filter(l => disponibles(l.id) > 0);
+  if (!con.length) return toast('No hay boletos disponibles');
+  const m = document.getElementById('modal');
+  m.innerHTML = `<div class="dlg" role="dialog" aria-modal="true"><h2>Vender boletos</h2>
+    <label>Artista y zona<select id="vl" onchange="detalleVenta()"><option value="">Selecciona…</option>
+      ${con.map(l => `<option value="${l.id}">${esc(l.artista)} — ${esc(l.zona)}</option>`).join('')}</select></label>
+    <div id="vdet"></div>
+    <div id="vform" hidden>
+      <div class="row"><label>Cantidad<input id="vq" type="number" min="1" value="1" oninput="calcVenta()"></label>
+      <label>Precio de venta (por boleto)<input id="vp" type="number" min="0" step="0.01" placeholder="0.00" oninput="calcVenta()"></label></div>
+      <label>Fecha de venta<input id="vf" type="datetime-local" value="${nowLocal()}"></label>
+      <label>Comentarios (opcional)<input id="vc" placeholder="Vendido a…"></label>
+      <label>PDF (opcional)<input id="vpdf" type="file" accept="application/pdf"></label>
+      <div id="vtot" class="vtot"></div>
+    </div>
+    <div class="dlg-act"><button class="sec" onclick="cerrarVenta()">Cancelar</button><button class="btn" onclick="vender()">Registrar venta</button></div></div>`;
+  m.classList.add('show');
+  if (id) { document.getElementById('vl').value = id; detalleVenta(); }
+}
+function cerrarVenta() { document.getElementById('modal').classList.remove('show'); }
+function detalleVenta() {
+  const id = val('vl'), d = document.getElementById('vdet'), f = document.getElementById('vform');
+  if (!id) { d.innerHTML = ''; f.hidden = true; return; }
+  const l = lote(id), n = disponibles(id);
+  d.innerHTML = `<div class="detalle"><div><span>Artista</span><b>${esc(l.artista)}</b></div><div><span>Zona</span><b>${esc(l.zona)}</b></div>
+    <div><span>Disponibles</span><b>${n}</b></div><div><span>Precio sugerido</span><b class="sug">${money(l.sugerido)}</b></div></div>`;
+  document.getElementById('vq').max = n; f.hidden = false; calcVenta();
+}
 function calcVenta() {
   const l = lote(val('vl')), q = +val('vq') || 0, p = parseFloat(val('vp'));
   document.getElementById('vtot').textContent = isNaN(p) ? '' : `Total: ${money(p * q)}` + (user.rol === 'admin' ? ` · Utilidad: ${money((p - l.costo) * q)}` : '');
 }
 async function vender() {
+  if (!val('vl')) return toast('Selecciona artista y zona');
   await sync();
   const l = lote(val('vl')), q = parseInt(val('vq')), p = parseFloat(val('vp'));
   if (!(q > 0)) return toast('Cantidad inválida');
   if (q > disponibles(l.id)) return toast('Solo hay ' + disponibles(l.id) + ' disponibles');
-  if (isNaN(p) || p < 0) return toast('Pon el precio de venta');
+  if (isNaN(p) || p < 0) return toast('Escribe el precio de venta');
   const pdf = await guardarArchivoPdf('vpdf', 'venta');
   db.ventas.push({ id: uid(), loteId: l.id, cantidad: q, precio: p, fecha: val('vf') || nowLocal(), comentario: val('vc'), pdf, vendedorId: user.id });
-  await save(); toast('Venta registrada'); vVentas();
+  cerrarVenta(); await save(); toast('Venta registrada'); vVentas();
 }
 async function anular(id) {
   if (!confirm('¿Anular esta venta? Los boletos volverán a estar disponibles.')) return;
