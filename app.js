@@ -33,7 +33,7 @@ const lotesVivos = () => db.lotes.filter(l => !l.borrado);
 // ---------- multiusuario: varias personas sobre la misma carpeta compartida ----------
 // Cada registro lleva "mod" (marca de tiempo). Al guardar se relee el archivo, se combinan
 // los cambios de ambos por registro (gana el más reciente) y recién entonces se escribe.
-const colecciones = ['usuarios', 'lotes', 'ventas'];
+const colecciones = ['usuarios', 'lotes', 'ventas', 'apartados', 'abonos'];
 let snap = new Map(), ultimoMod = 0;
 function tomaSnap() { snap = new Map(); for (const c of colecciones) for (const r of db[c]) snap.set(r.id, JSON.stringify(r)); }
 function merge(local, remoto) {
@@ -55,7 +55,12 @@ async function _save() {
       const remoto = await Store.leerDisco();
       if (remoto) db = merge(db, remoto);
     }
-    const merged = await Store.guardar(db); if (Store.modo() === 'hoja' && merged) db = merged;
+    const merged = await Store.guardar(db);
+    if (Store.modo() === 'hoja' && merged) {
+      if (merged.apartados === undefined && (db.apartados.length || db.abonos.length)) toast('Actualiza el script de Google (Code.gs) para guardar apartados');
+      for (const c of colecciones) if (!merged[c]) merged[c] = db[c];
+      db = merged;
+    }
     tomaSnap();
     if (Store.compartido()) ultimoMod = await Store.modificado();
     if (user) user = db.usuarios.find(u => u.id === user.id) || user;
@@ -81,7 +86,11 @@ setInterval(async () => {
   } catch (e) { }
 }, 8000);
 const vendidos = id => db.ventas.filter(v => v.loteId === id && !v.anulada).reduce((a, v) => a + v.cantidad, 0);
-const disponibles = id => lote(id).cantidad - vendidos(id);
+const apartadosActivos = id => db.apartados.filter(a => a.loteId === id && a.estado === 'activo').reduce((t, a) => t + a.cantidad, 0);
+const disponibles = id => lote(id).cantidad - vendidos(id) - apartadosActivos(id);
+const abonosDe = id => db.abonos.filter(b => b.apartadoId === id && !b.anulado);
+const abonado = id => abonosDe(id).reduce((t, b) => t + b.monto, 0);
+const totalAp = a => a.precio * a.cantidad;
 const nombreUser = id => db.usuarios.find(u => u.id === id)?.nombre ?? '—';
 
 async function guardarArchivoPdf(inputId, prefijo) {
@@ -153,13 +162,13 @@ function render() {
   if (!db.usuarios.length) return renderPrimerAdmin();
   if (!user) return renderLogin();
   const admin = user.rol === 'admin';
-  const tabs = admin ? [['inventario', 'Boletos'], ['ventas', 'Ventas'], ['usuarios', 'Usuarios']] : [['ventas', 'Ventas']];
+  const tabs = admin ? [['inventario', 'Boletos'], ['ventas', 'Ventas'], ['apartados', 'Apartados'], ['usuarios', 'Usuarios']] : [['ventas', 'Ventas'], ['apartados', 'Apartados']];
   if (!tabs.some(t => t[0] === tab)) tab = tabs[0][0]; // el rol usuario solo ve Ventas
   $app.innerHTML = `<header><h1>🎟️ Control de Boletos</h1>
     <nav>${tabs.map(([k, l]) => `<button class="${tab === k ? 'on' : ''}" onclick="go('${k}')">${l}</button>`).join('')}</nav>
     <span class="mut">${esc(user.nombre)} (${user.rol})</span><button class="sec" onclick="logout()">Salir</button></header>
     <main id="view"></main>`;
-  ({ inventario: vInventario, ventas: vVentas, usuarios: vUsuarios, datos: vDatos })[tab]();
+  ({ inventario: vInventario, ventas: vVentas, apartados: vApartados, usuarios: vUsuarios, datos: vDatos })[tab]();
 }
 const go = t => { tab = t; filtroInv = ''; render(); };
 
@@ -226,14 +235,14 @@ function vInventario(edit) {
 async function guardarLote(id) {
   const o = { artista: val('la'), zona: val('lz'), cantidad: parseInt(val('lc')), costo: parseFloat(val('lk')), sugerido: parseFloat(val('ls')), fecha: val('lf') || nowLocal(), comentarios: val('lcm') };
   if (!o.artista || !o.zona || !(o.cantidad > 0) || isNaN(o.costo) || isNaN(o.sugerido)) return toast('Completa artista, zona, cantidad, costo y precio sugerido');
-  if (id && o.cantidad < vendidos(id)) return toast('La cantidad no puede ser menor a lo ya vendido (' + vendidos(id) + ')');
+  if (id && o.cantidad < vendidos(id) + apartadosActivos(id)) return toast('La cantidad no puede ser menor a lo vendido y apartado (' + (vendidos(id) + apartadosActivos(id)) + ')');
   const pdf = await guardarArchivoPdf('lp', 'ingreso');
   if (id) { const l = lote(id); Object.assign(l, o); if (pdf) l.pdf = pdf; else if (document.getElementById('lpq')?.checked) l.pdf = null; }
   else db.lotes.push({ id: uid(), ...o, pdf, usuarioId: user.id });
   await save(); toast('Guardado'); vInventario();
 }
 async function borrarLote(id) {
-  if (db.ventas.some(v => v.loteId === id)) return toast('Tiene ventas registradas; no se puede borrar');
+  if (db.ventas.some(v => v.loteId === id) || db.apartados.some(a => a.loteId === id)) return toast('Tiene ventas o apartados registrados; no se puede borrar');
   if (!confirm('¿Borrar este ingreso de boletos?')) return;
   lote(id).borrado = true; await save(); vInventario();
 }
@@ -315,6 +324,144 @@ async function vender() {
 async function anular(id) {
   if (!confirm('¿Anular esta venta? Los boletos volverán a estar disponibles.')) return;
   db.ventas.find(x => x.id === id).anulada = true; await save(); vVentas();
+}
+
+// ---------- apartados ----------
+let estadoAp = 'activo';
+const tagAp = e => e === 'activo' ? '<span class="tag">Apartado</span>' : e === 'liquidado' ? '<span class="tag ok">Vendido</span>' : '<span class="tag err">Liberado</span>';
+const boletoHtml = l => `${esc(l?.artista)}<br><span class="zona">${esc(l?.zona)}</span>`;
+
+function vApartados() {
+  const lista = db.apartados.filter(a => estadoAp === 'todos' || a.estado === estadoAp).sort((x, y) => y.fecha.localeCompare(x.fecha));
+  const act = db.apartados.filter(a => a.estado === 'activo');
+  const porCobrar = act.reduce((t, a) => t + Math.max(0, totalAp(a) - abonado(a.id)), 0);
+  const hay = lotesVivos().some(l => disponibles(l.id) > 0);
+  document.getElementById('view').innerHTML = `
+  <div class="stats">
+    <div class="stat"><span class="mut">Boletos apartados</span><b>${act.reduce((t, a) => t + a.cantidad, 0)}</b></div>
+    <div class="stat"><span class="mut">Abonado (activos)</span><b>${money(act.reduce((t, a) => t + abonado(a.id), 0))}</b></div>
+    <div class="stat"><span class="mut">Por cobrar</span><b>${money(porCobrar)}</b></div>
+  </div>
+  <div class="card"><div class="head"><h2>Apartados</h2>
+    <div class="ctrls"><select id="estAp" onchange="estadoAp=this.value;vApartados()">
+      ${[['activo', 'Activos'], ['liquidado', 'Vendidos'], ['liberado', 'Liberados'], ['todos', 'Todos']].map(([k, n]) => `<option value="${k}" ${estadoAp === k ? 'selected' : ''}>${n}</option>`).join('')}</select>
+    <input id="filtro" class="filtro" type="search" placeholder="Filtrar por cliente, artista o zona…" value="${esc(filtroInv)}" oninput="filtrarInv()">
+    <button class="btn" onclick="nuevoApartado()" ${hay ? '' : 'disabled'}>Nuevo apartado</button></div></div>
+  <table><tr><th>Cliente</th><th>Boleto</th><th>Cant.</th><th>Total</th><th>Abonado</th><th>Saldo</th><th>Estado</th><th></th></tr>
+  ${lista.map(a => {
+    const l = lote(a.loteId), ab = abonado(a.id), saldo = totalAp(a) - ab;
+    return `<tr class="inv" data-t="${esc((a.cliente + ' ' + (l?.artista ?? '') + ' ' + (l?.zona ?? '')).toLowerCase())}">
+    <td>${esc(a.cliente)}<br><span class="mut">${fdate(a.fecha)}</span></td><td>${boletoHtml(l)}</td><td>${a.cantidad}</td><td>${money(totalAp(a))}</td><td>${money(ab)}</td>
+    <td class="${a.estado === 'activo' && saldo > 0.005 ? 'sug' : ''}">${money(Math.max(0, saldo))}</td><td>${tagAp(a.estado)}</td>
+    <td class="acts"><button class="btn sm" onclick="abrirApartado('${a.id}')">${a.estado === 'activo' ? 'Abonos' : 'Ver'}</button></td></tr>`;
+  }).join('') || '<tr><td colspan="8" class="mut">Sin apartados</td></tr>'}</table><p id="sinres" class="mut" hidden>Sin resultados para el filtro.</p></div>`;
+  filtrarInv();
+}
+
+function nuevoApartado() {
+  const con = lotesVivos().filter(l => disponibles(l.id) > 0);
+  if (!con.length) return toast('No hay boletos disponibles');
+  const m = document.getElementById('modal');
+  m.innerHTML = `<div class="dlg" role="dialog" aria-modal="true"><h2>Nuevo apartado</h2>
+    <label>Artista y zona<select id="al" onchange="detalleAp()"><option value="">Selecciona…</option>
+      ${con.map(l => `<option value="${l.id}">${esc(l.artista)} — ${esc(l.zona)}</option>`).join('')}</select></label>
+    <div id="adet"></div>
+    <div id="aform" hidden>
+      <label>Cliente<input id="ac" placeholder="Nombre de quien aparta"></label>
+      <div class="row"><label>Cantidad<input id="aq" type="number" min="1" value="1" oninput="calcAp()"></label>
+      <label>Precio acordado (por boleto)<input id="ap" type="number" min="0" step="0.01" placeholder="0.00" oninput="calcAp()"></label></div>
+      <div class="row"><label>Abono inicial (opcional)<input id="aa" type="number" min="0" step="0.01" placeholder="0.00" oninput="calcAp()"></label>
+      <label>Fecha<input id="af" type="datetime-local" value="${nowLocal()}"></label></div>
+      <label>Comentarios (opcional)<textarea id="am" rows="2"></textarea></label>
+      <div id="atot" class="vtot"></div>
+    </div>
+    <div class="dlg-act"><button class="sec" onclick="cerrarVenta()">Cancelar</button><button class="btn" onclick="crearApartado()">Apartar</button></div></div>`;
+  m.classList.add('show');
+}
+function detalleAp() {
+  const id = val('al'), d = document.getElementById('adet'), f = document.getElementById('aform');
+  if (!id) { d.innerHTML = ''; f.hidden = true; return; }
+  const l = lote(id), n = disponibles(id);
+  d.innerHTML = `<div class="detalle"><div><span>Artista</span><b>${esc(l.artista)}</b></div><div><span>Zona</span><b class="zona">${esc(l.zona)}</b></div>
+    <div><span>Disponibles</span><b>${n}</b></div><div><span>Precio sugerido</span><b class="sug">${money(l.sugerido)}</b></div>
+    ${l.comentarios ? `<div class="full"><span>Comentarios</span><b class="coment">${esc(l.comentarios)}</b></div>` : ''}</div>`;
+  document.getElementById('aq').max = n; f.hidden = false; calcAp();
+}
+function calcAp() {
+  const q = +val('aq') || 0, p = parseFloat(val('ap')), ab = parseFloat(val('aa')) || 0;
+  document.getElementById('atot').textContent = isNaN(p) ? '' : `Total: ${money(p * q)} · Saldo: ${money(Math.max(0, p * q - ab))}`;
+}
+async function crearApartado() {
+  if (!val('al')) return toast('Selecciona artista y zona');
+  await sync();
+  const l = lote(val('al')), q = parseInt(val('aq')), p = parseFloat(val('ap')), ab = parseFloat(val('aa')) || 0, cli = val('ac');
+  if (!cli) return toast('Escribe el nombre del cliente');
+  if (!(q > 0)) return toast('Cantidad inválida');
+  if (q > disponibles(l.id)) return toast('Solo hay ' + disponibles(l.id) + ' disponibles');
+  if (isNaN(p) || p < 0) return toast('Escribe el precio acordado');
+  if (ab < 0 || ab > p * q) return toast('El abono no puede ser mayor al total');
+  const fecha = val('af') || nowLocal(), id = uid();
+  db.apartados.push({ id, loteId: l.id, cliente: cli, cantidad: q, precio: p, fecha, comentarios: val('am'), estado: 'activo', usuarioId: user.id });
+  if (ab > 0) db.abonos.push({ id: uid(), apartadoId: id, monto: ab, fecha, nota: 'Abono inicial', usuarioId: user.id });
+  cerrarVenta(); await save(); toast('Boletos apartados'); vApartados();
+}
+
+function abrirApartado(id) {
+  const a = db.apartados.find(x => x.id === id), l = lote(a.loteId);
+  const ab = abonado(id), saldo = totalAp(a) - ab, activo = a.estado === 'activo';
+  const abonos = [...db.abonos.filter(b => b.apartadoId === id)].sort((x, y) => x.fecha.localeCompare(y.fecha));
+  const m = document.getElementById('modal');
+  m.innerHTML = `<div class="dlg" role="dialog" aria-modal="true"><h2>Apartado de ${esc(a.cliente)} ${tagAp(a.estado)}</h2>
+    <div class="detalle"><div><span>Artista</span><b>${esc(l?.artista)}</b></div><div><span>Zona</span><b class="zona">${esc(l?.zona)}</b></div>
+      <div><span>Cantidad</span><b>${a.cantidad} × ${money(a.precio)}</b></div><div><span>Total</span><b>${money(totalAp(a))}</b></div>
+      <div><span>Abonado</span><b>${money(ab)}</b></div><div><span>Saldo</span><b class="${saldo > 0.005 && activo ? 'sug' : ''}">${money(Math.max(0, saldo))}</b></div>
+      ${a.comentarios ? `<div class="full"><span>Comentarios</span><b class="coment">${esc(a.comentarios)}</b></div>` : ''}</div>
+    <h3 class="sub">Abonos</h3>
+    <div class="abonos">${abonos.map(b => `<div class="abono ${b.anulado ? 'anul' : ''}"><div><b>${money(b.monto)}</b> <span class="mut">${fdate(b.fecha)}</span><br><span class="mut">${esc(b.nota)}${b.anulado ? ' (anulado)' : ''}</span></div>
+      ${activo && !b.anulado && user.rol === 'admin' ? `<button class="sec danger" onclick="anularAbono('${b.id}','${id}')">Anular</button>` : ''}</div>`).join('') || '<p class="mut">Aún no hay abonos.</p>'}</div>
+    ${activo ? `<div class="row"><label>Monto del abono<input id="bm" type="number" min="0" step="0.01" placeholder="0.00"></label>
+      <label>Fecha<input id="bf" type="datetime-local" value="${nowLocal()}"></label></div>
+      <label>Nota (opcional)<input id="bn" placeholder="Efectivo, transferencia…"></label>
+      <button class="btn" onclick="agregarAbono('${id}')">Registrar abono</button>
+      <div class="dlg-act" style="justify-content:space-between">
+        ${user.rol === 'admin' ? `<button class="sec danger" onclick="liberarAp('${id}')">Liberar boletos</button>` : '<span></span>'}
+        <button class="btn" onclick="liquidarAp('${id}')" ${saldo > 0.005 ? 'disabled title="Falta saldo por cubrir"' : ''}>Pasar a venta</button></div>`
+      : `<p class="mut">${a.estado === 'liquidado' ? 'Este apartado se convirtió en venta.' : 'Boletos liberados el ' + fdate(a.fechaLib) + (ab > 0 ? '. Había ' + money(ab) + ' abonados: recuerda devolverlos.' : '.')}</p>`}
+    <div class="dlg-act"><button class="sec" onclick="cerrarVenta()">Cerrar</button></div></div>`;
+  m.classList.add('show');
+}
+async function agregarAbono(id) {
+  await sync();
+  const a = db.apartados.find(x => x.id === id), monto = parseFloat(val('bm'));
+  if (a.estado !== 'activo') return toast('Este apartado ya no está activo');
+  if (!(monto > 0)) return toast('Escribe el monto del abono');
+  if (monto > totalAp(a) - abonado(id) + 0.005) return toast('El abono excede el saldo (' + money(totalAp(a) - abonado(id)) + ')');
+  db.abonos.push({ id: uid(), apartadoId: id, monto, fecha: val('bf') || nowLocal(), nota: val('bn'), usuarioId: user.id });
+  await save(); toast('Abono registrado'); abrirApartado(id); vApartados();
+}
+async function anularAbono(bid, id) {
+  if (!confirm('¿Anular este abono?')) return;
+  db.abonos.find(b => b.id === bid).anulado = true; await save(); abrirApartado(id); vApartados();
+}
+async function liberarAp(id) {
+  if (user.rol !== 'admin') return toast('Solo el administrador puede liberar apartados');
+  const a = db.apartados.find(x => x.id === id), ab = abonado(id);
+  if (!confirm('¿Liberar estos boletos? Volverán a estar disponibles para la venta.' + (ab > 0 ? '\n\nYa hay ' + money(ab) + ' abonados; recuerda devolverlos.' : ''))) return;
+  await sync();
+  if (a.estado !== 'activo') return toast('Este apartado ya no está activo');
+  a.estado = 'liberado'; a.fechaLib = nowLocal();
+  await save(); toast('Boletos liberados'); abrirApartado(id); vApartados();
+}
+async function liquidarAp(id) {
+  await sync();
+  const a = db.apartados.find(x => x.id === id);
+  if (a.estado !== 'activo') return toast('Este apartado ya no está activo');
+  if (abonado(id) < totalAp(a) - 0.005) return toast('Aún falta saldo por cubrir');
+  if (!confirm('¿Pasar este apartado a venta por ' + money(totalAp(a)) + '?')) return;
+  const vid = uid();
+  db.ventas.push({ id: vid, loteId: a.loteId, cantidad: a.cantidad, precio: a.precio, fecha: nowLocal(), comentario: 'Apartado de ' + a.cliente + (a.comentarios ? ' · ' + a.comentarios : ''), pdf: null, vendedorId: user.id, apartadoId: id });
+  a.estado = 'liquidado'; a.ventaId = vid;
+  cerrarVenta(); await save(); toast('Venta registrada'); vApartados();
 }
 
 // ---------- usuarios (admin) ----------

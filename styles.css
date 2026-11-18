@@ -140,3 +140,11 @@ button.sm{padding:7px 14px;min-height:36px}
 
 .detalle .full{grid-column:1/-1}
 .detalle b.coment{font-size:14px;font-weight:500;white-space:pre-line}
+
+.ctrls{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.ctrls select{width:auto;margin:0}
+.sub{font-size:14px;margin:6px 0 8px}
+.abonos{max-height:180px;overflow:auto;margin-bottom:12px}
+.abono{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--bd);border-radius:10px;margin-bottom:6px;background:var(--bg)}
+.abono.anul{opacity:.5;text-decoration:line-through}
+@media(max-width:700px){.ctrls{flex-direction:column;align-items:stretch}.ctrls select{width:100%}}

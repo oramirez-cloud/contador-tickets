@@ -14,7 +14,9 @@ const CARPETA_PDF = 'BoletosPDF';
 const HOJAS = {
   usuarios: ['id', 'mod', 'json', 'usuario', 'nombre', 'rol', 'activo'],
   lotes: ['id', 'mod', 'json', 'artista', 'zona', 'cantidad', 'costo', 'sugerido', 'fecha', 'borrado'],
-  ventas: ['id', 'mod', 'json', 'loteId', 'cantidad', 'precio', 'fecha', 'comentario', 'anulada']
+  ventas: ['id', 'mod', 'json', 'loteId', 'cantidad', 'precio', 'fecha', 'comentario', 'anulada'],
+  apartados: ['id', 'mod', 'json', 'cliente', 'loteId', 'cantidad', 'precio', 'fecha', 'estado', 'comentarios'],
+  abonos: ['id', 'mod', 'json', 'apartadoId', 'monto', 'fecha', 'nota', 'anulado']
 };
 
 function doGet() { return salida({ ok: true, mensaje: 'Funcionando' }); }

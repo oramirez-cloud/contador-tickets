@@ -7,7 +7,7 @@ const Store = (() => {
   let dir = null, hoja = null;
   try { hoja = JSON.parse(localStorage.getItem(LSH)); } catch (e) { }
   if (typeof CONFIG !== 'undefined' && CONFIG.url && CONFIG.clave) hoja = { url: CONFIG.url, clave: CONFIG.clave }; // config.js manda
-  const empty = () => ({ version: 2, usuarios: [], lotes: [], ventas: [] });
+  const empty = () => ({ version: 2, usuarios: [], lotes: [], ventas: [], apartados: [], abonos: [] });
 
   // text/plain evita el preflight CORS que Apps Script no soporta
   async function llamar(accion, extra = {}) {
@@ -68,7 +68,7 @@ const Store = (() => {
       if (hoja) d = (await llamar('leer')).data;
       else if (dir) d = await readJson();
       else { try { d = JSON.parse(localStorage.getItem(LS)); } catch (e) { } }
-      return d || empty();
+      return Object.assign(empty(), d || {}); // asegura arreglos nuevos en datos viejos
     },
     // En modo hoja devuelve los datos ya combinados por el servidor
     async guardar(data) {
