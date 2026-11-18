@@ -323,3 +323,14 @@ async function importar(f) {
 }
 
 boot();
+
+// Etiqueta cada celda con el nombre de su columna (para mostrar las tablas como tarjetas en móvil)
+function etiquetar() {
+  document.querySelectorAll('table').forEach(t => {
+    const heads = [...t.querySelectorAll('tr:first-child th')].map(h => h.textContent);
+    t.querySelectorAll('tr').forEach(tr => [...tr.children].forEach((td, i) => {
+      if (td.tagName === 'TD' && !td.hasAttribute('colspan') && heads[i] !== undefined) td.dataset.label = heads[i];
+    }));
+  });
+}
+new MutationObserver(etiquetar).observe(document.getElementById('app'), { childList: true, subtree: true });
