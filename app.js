@@ -161,7 +161,7 @@ function render() {
     <main id="view"></main>`;
   ({ inventario: vInventario, ventas: vVentas, usuarios: vUsuarios, datos: vDatos })[tab]();
 }
-const go = t => { tab = t; render(); };
+const go = t => { tab = t; filtroInv = ''; render(); };
 
 // ---------- sesión ----------
 function renderPrimerAdmin() {
@@ -215,11 +215,12 @@ function vInventario(edit) {
   <label>${edit && l.pdf ? 'Reemplazar PDF (opcional)' : 'PDF de los boletos (opcional)'}<input id="lp" type="file" accept="application/pdf"></label></div>
   ${edit && l.pdf ? `<p class="pdfactual">PDF actual: ${pdfBtn(l.pdf)} <label style="display:inline;margin-left:10px"><input id="lpq" type="checkbox" style="width:auto;margin-right:6px">Quitar PDF</label></p>` : ''}
   <button class="btn" onclick="guardarLote('${edit || ''}')">Guardar</button> ${edit ? '<button class="sec" onclick="vInventario()">Cancelar</button>' : ''}</div>
-  <div class="card"><h2>Inventario</h2><table><tr><th>Artista</th><th>Zona</th><th>Disp.</th><th>Costo</th><th>Sugerido</th><th>Ingreso</th><th></th></tr>
-  ${[...lotesVivos()].reverse().map(x => `<tr><td>${esc(x.artista)}</td><td><span class="zona">${esc(x.zona)}</span></td><td>${disponibles(x.id)} / ${x.cantidad}</td><td>${money(x.costo)}</td><td>${money(x.sugerido)}</td>
+  <div class="card"><div class="head"><h2>Inventario</h2><input id="filtro" class="filtro" type="search" placeholder="Filtrar por artista o zona…" value="${esc(filtroInv)}" oninput="filtrarInv()"></div><table><tr><th>Artista</th><th>Zona</th><th>Disp.</th><th>Costo</th><th>Sugerido</th><th>Ingreso</th><th></th></tr>
+  ${[...lotesVivos()].reverse().map(x => `<tr class="inv" data-t="${esc((x.artista + ' ' + x.zona).toLowerCase())}"><td>${esc(x.artista)}</td><td><span class="zona">${esc(x.zona)}</span></td><td>${disponibles(x.id)} / ${x.cantidad}</td><td>${money(x.costo)}</td><td>${money(x.sugerido)}</td>
   <td>${fdate(x.fecha)}<br><span class="mut">${esc(nombreUser(x.usuarioId))}</span></td>
   <td class="acts">${pdfBtn(x.pdf)} <button class="sec" onclick="vInventario('${x.id}')">Editar</button>
-  <button class="sec danger" onclick="borrarLote('${x.id}')">Borrar</button></td></tr>`).join('') || '<tr><td colspan="7" class="mut">Sin boletos ingresados</td></tr>'}</table></div>`;
+  <button class="sec danger" onclick="borrarLote('${x.id}')">Borrar</button></td></tr>`).join('') || '<tr><td colspan="7" class="mut">Sin boletos ingresados</td></tr>'}</table><p id="sinres" class="mut" hidden>Sin resultados para el filtro.</p></div>`;
+  filtrarInv();
 }
 async function guardarLote(id) {
   const o = { artista: val('la'), zona: val('lz'), cantidad: parseInt(val('lc')), costo: parseFloat(val('lk')), sugerido: parseFloat(val('ls')), fecha: val('lf') || nowLocal() };
