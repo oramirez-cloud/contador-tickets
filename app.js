@@ -212,7 +212,8 @@ function vInventario(edit) {
   <label>Costo por boleto<input id="lk" type="number" min="0" step="0.01" value="${l.costo ?? ''}"></label>
   <label>Precio sugerido de venta<input id="ls" type="number" min="0" step="0.01" value="${l.sugerido ?? ''}"></label>
   <label>Fecha de ingreso<input id="lf" type="datetime-local" value="${esc(l.fecha || nowLocal())}"></label>
-  <label>PDF de los boletos (opcional)<input id="lp" type="file" accept="application/pdf"></label></div>
+  <label>${edit && l.pdf ? 'Reemplazar PDF (opcional)' : 'PDF de los boletos (opcional)'}<input id="lp" type="file" accept="application/pdf"></label></div>
+  ${edit && l.pdf ? `<p class="pdfactual">PDF actual: ${pdfBtn(l.pdf)} <label style="display:inline;margin-left:10px"><input id="lpq" type="checkbox" style="width:auto;margin-right:6px">Quitar PDF</label></p>` : ''}
   <button class="btn" onclick="guardarLote('${edit || ''}')">Guardar</button> ${edit ? '<button class="sec" onclick="vInventario()">Cancelar</button>' : ''}</div>
   <div class="card"><h2>Inventario</h2><table><tr><th>Artista</th><th>Zona</th><th>Disp.</th><th>Costo</th><th>Sugerido</th><th>Ingreso</th><th></th></tr>
   ${[...lotesVivos()].reverse().map(x => `<tr><td>${esc(x.artista)}</td><td><span class="zona">${esc(x.zona)}</span></td><td>${disponibles(x.id)} / ${x.cantidad}</td><td>${money(x.costo)}</td><td>${money(x.sugerido)}</td>
@@ -225,7 +226,7 @@ async function guardarLote(id) {
   if (!o.artista || !o.zona || !(o.cantidad > 0) || isNaN(o.costo) || isNaN(o.sugerido)) return toast('Completa artista, zona, cantidad, costo y precio sugerido');
   if (id && o.cantidad < vendidos(id)) return toast('La cantidad no puede ser menor a lo ya vendido (' + vendidos(id) + ')');
   const pdf = await guardarArchivoPdf('lp', 'ingreso');
-  if (id) { const l = lote(id); Object.assign(l, o); if (pdf) l.pdf = pdf; }
+  if (id) { const l = lote(id); Object.assign(l, o); if (pdf) l.pdf = pdf; else if (document.getElementById('lpq')?.checked) l.pdf = null; }
   else db.lotes.push({ id: uid(), ...o, pdf, usuarioId: user.id });
   await save(); toast('Guardado'); vInventario();
 }
