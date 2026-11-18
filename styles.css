@@ -94,6 +94,7 @@ button.sm{padding:7px 14px;min-height:36px}
 .dlg-act button{min-height:44px}
 [hidden]{display:none!important}
 
+.filtro{max-width:280px;margin:0}
 /* ---------- móvil ---------- */
 @media(max-width:700px){
   body{font-size:15px;padding-bottom:calc(72px + env(safe-area-inset-bottom))}
@@ -112,7 +113,8 @@ button.sm{padding:7px 14px;min-height:36px}
   button.btn{width:100%;min-height:46px;margin-top:4px}
   #vtot{display:block;margin:10px 0 0!important}
   .login{margin:8vh auto;max-width:none}
-  .head button.btn{width:auto}
+  .head{flex-direction:column;align-items:stretch;gap:8px}
+  .filtro{max-width:none}
   #modal{align-items:flex-end;padding:0}
   .dlg{max-width:none;border-radius:18px 18px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom));max-height:94vh}
   .dlg-act button{flex:1;width:auto}

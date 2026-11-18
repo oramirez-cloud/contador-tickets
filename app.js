@@ -239,10 +239,10 @@ async function borrarLote(id) {
 function vVentas() {
   const con = lotesVivos().filter(l => disponibles(l.id) > 0);
   document.getElementById('view').innerHTML = `
-  <div class="card"><div class="head"><h2>Boletos disponibles</h2><button class="btn" onclick="abrirVenta()" ${con.length ? '' : 'disabled'}>Vender</button></div>
+  <div class="card"><div class="head"><h2>Boletos disponibles</h2><input id="filtro" class="filtro" type="search" placeholder="Filtrar por artista o zona…" value="${esc(filtroInv)}" oninput="filtrarInv()"></div>
   <table><tr><th>Artista</th><th>Zona</th><th>Disponibles</th><th>Precio sugerido</th><th></th></tr>
-  ${con.map(l => `<tr><td>${esc(l.artista)}</td><td>${esc(l.zona)}</td><td>${disponibles(l.id)}</td><td class="sug">${money(l.sugerido)}</td>
-    <td class="acts"><button class="btn sm" onclick="abrirVenta('${l.id}')">Vender</button></td></tr>`).join('') || '<tr><td colspan="5" class="mut">No hay boletos disponibles.</td></tr>'}</table></div>
+  ${con.map(l => `<tr class="inv" data-t="${esc((l.artista + ' ' + l.zona).toLowerCase())}"><td>${esc(l.artista)}</td><td>${esc(l.zona)}</td><td>${disponibles(l.id)}</td><td class="sug">${money(l.sugerido)}</td>
+    <td class="acts"><button class="btn sm" onclick="abrirVenta('${l.id}')">Vender</button></td></tr>`).join('') || '<tr><td colspan="5" class="mut">No hay boletos disponibles.</td></tr>'}</table><p id="sinres" class="mut" hidden>Sin resultados para el filtro.</p></div>
   <div class="card"><h2>Historial de ventas</h2>
   <table><tr><th>Fecha</th><th>Boleto</th><th>Cant.</th><th>Precio</th><th>Total</th>${user.rol === 'admin' ? '<th>Utilidad</th>' : ''}<th>Comentarios</th><th></th></tr>
   ${[...db.ventas].sort((a, b) => b.fecha.localeCompare(a.fecha)).map(v => {
@@ -251,6 +251,16 @@ function vVentas() {
     <td>${v.cantidad}</td><td>${money(v.precio)}</td><td>${money(v.precio * v.cantidad)}</td>${user.rol === 'admin' ? `<td>${money((v.precio - (l?.costo ?? 0)) * v.cantidad)}</td>` : ''}<td>${esc(v.comentario)}</td>
     <td class="acts">${v.anulada ? '<span class="tag err">Anulada</span>' : `${pdfBtn(v.pdf)} ${user.rol === 'admin' ? `<button class="sec danger" onclick="anular('${v.id}')">Anular</button>` : ''}`}</td></tr>`;
   }).join('') || '<tr><td colspan="8" class="mut">Sin ventas</td></tr>'}</table></div>`;
+  filtrarInv();
+}
+
+let filtroInv = '';
+function filtrarInv() {
+  const f = document.getElementById('filtro'); if (!f) return;
+  filtroInv = f.value; const q = filtroInv.trim().toLowerCase();
+  let hay = 0;
+  document.querySelectorAll('tr.inv').forEach(tr => { const ok = !q || tr.dataset.t.includes(q); tr.style.display = ok ? '' : 'none'; if (ok) hay++; });
+  const sr = document.getElementById('sinres'); if (sr) sr.hidden = hay > 0 || !document.querySelector('tr.inv');
 }
 
 // ----- modal de venta -----
