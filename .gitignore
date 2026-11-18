@@ -1,0 +1,4 @@
+# Datos reales: nunca subir al repo
+datos.json
+pdfs/
+*.sqlite
