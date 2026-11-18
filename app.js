@@ -215,7 +215,7 @@ function vInventario(edit) {
   <label>PDF de los boletos (opcional)<input id="lp" type="file" accept="application/pdf"></label></div>
   <button class="btn" onclick="guardarLote('${edit || ''}')">Guardar</button> ${edit ? '<button class="sec" onclick="vInventario()">Cancelar</button>' : ''}</div>
   <div class="card"><h2>Inventario</h2><table><tr><th>Artista</th><th>Zona</th><th>Disp.</th><th>Costo</th><th>Sugerido</th><th>Ingreso</th><th></th></tr>
-  ${[...lotesVivos()].reverse().map(x => `<tr><td>${esc(x.artista)}</td><td>${esc(x.zona)}</td><td>${disponibles(x.id)} / ${x.cantidad}</td><td>${money(x.costo)}</td><td>${money(x.sugerido)}</td>
+  ${[...lotesVivos()].reverse().map(x => `<tr><td>${esc(x.artista)}</td><td><span class="zona">${esc(x.zona)}</span></td><td>${disponibles(x.id)} / ${x.cantidad}</td><td>${money(x.costo)}</td><td>${money(x.sugerido)}</td>
   <td>${fdate(x.fecha)}<br><span class="mut">${esc(nombreUser(x.usuarioId))}</span></td>
   <td class="acts">${pdfBtn(x.pdf)} <button class="sec" onclick="vInventario('${x.id}')">Editar</button>
   <button class="sec danger" onclick="borrarLote('${x.id}')">Borrar</button></td></tr>`).join('') || '<tr><td colspan="7" class="mut">Sin boletos ingresados</td></tr>'}</table></div>`;
@@ -241,13 +241,13 @@ function vVentas() {
   document.getElementById('view').innerHTML = `
   <div class="card"><div class="head"><h2>Boletos disponibles</h2><input id="filtro" class="filtro" type="search" placeholder="Filtrar por artista o zona…" value="${esc(filtroInv)}" oninput="filtrarInv()"></div>
   <table><tr><th>Artista</th><th>Zona</th><th>Disponibles</th><th>Precio sugerido</th><th></th></tr>
-  ${con.map(l => `<tr class="inv" data-t="${esc((l.artista + ' ' + l.zona).toLowerCase())}"><td>${esc(l.artista)}</td><td>${esc(l.zona)}</td><td>${disponibles(l.id)}</td><td class="sug">${money(l.sugerido)}</td>
+  ${con.map(l => `<tr class="inv" data-t="${esc((l.artista + ' ' + l.zona).toLowerCase())}"><td>${esc(l.artista)}</td><td><span class="zona">${esc(l.zona)}</span></td><td>${disponibles(l.id)}</td><td class="sug">${money(l.sugerido)}</td>
     <td class="acts"><button class="btn sm" onclick="abrirVenta('${l.id}')">Vender</button></td></tr>`).join('') || '<tr><td colspan="5" class="mut">No hay boletos disponibles.</td></tr>'}</table><p id="sinres" class="mut" hidden>Sin resultados para el filtro.</p></div>
   <div class="card"><h2>Historial de ventas</h2>
   <table><tr><th>Fecha</th><th>Boleto</th><th>Cant.</th><th>Precio</th><th>Total</th>${user.rol === 'admin' ? '<th>Utilidad</th>' : ''}<th>Comentarios</th><th></th></tr>
   ${[...db.ventas].sort((a, b) => b.fecha.localeCompare(a.fecha)).map(v => {
     const l = lote(v.loteId);
-    return `<tr><td>${fdate(v.fecha)}<br><span class="mut">${esc(nombreUser(v.vendedorId))}</span></td><td>${esc(l?.artista)}<br><span class="mut">${esc(l?.zona)}</span></td>
+    return `<tr><td>${fdate(v.fecha)}<br><span class="mut">${esc(nombreUser(v.vendedorId))}</span></td><td>${esc(l?.artista)}<br><span class="zona">${esc(l?.zona)}</span></td>
     <td>${v.cantidad}</td><td>${money(v.precio)}</td><td>${money(v.precio * v.cantidad)}</td>${user.rol === 'admin' ? `<td>${money((v.precio - (l?.costo ?? 0)) * v.cantidad)}</td>` : ''}<td>${esc(v.comentario)}</td>
     <td class="acts">${v.anulada ? '<span class="tag err">Anulada</span>' : `${pdfBtn(v.pdf)} ${user.rol === 'admin' ? `<button class="sec danger" onclick="anular('${v.id}')">Anular</button>` : ''}`}</td></tr>`;
   }).join('') || '<tr><td colspan="8" class="mut">Sin ventas</td></tr>'}</table></div>`;
@@ -290,7 +290,7 @@ function detalleVenta() {
   const id = val('vl'), d = document.getElementById('vdet'), f = document.getElementById('vform');
   if (!id) { d.innerHTML = ''; f.hidden = true; return; }
   const l = lote(id), n = disponibles(id);
-  d.innerHTML = `<div class="detalle"><div><span>Artista</span><b>${esc(l.artista)}</b></div><div><span>Zona</span><b>${esc(l.zona)}</b></div>
+  d.innerHTML = `<div class="detalle"><div><span>Artista</span><b>${esc(l.artista)}</b></div><div><span>Zona</span><b class="zona">${esc(l.zona)}</b></div>
     <div><span>Disponibles</span><b>${n}</b></div><div><span>Precio sugerido</span><b class="sug">${money(l.sugerido)}</b></div></div>`;
   document.getElementById('vq').max = n; f.hidden = false; calcVenta();
 }

@@ -97,6 +97,8 @@ button.sm{padding:7px 14px;min-height:36px}
 [hidden]{display:none!important}
 
 .filtro{max-width:280px;margin:0}
+.zona{display:inline-block;background:color-mix(in srgb,var(--pri) 14%,transparent);color:var(--pri);font-weight:700;padding:2px 10px;border-radius:8px;border:1px solid color-mix(in srgb,var(--pri) 35%,transparent)}
+.detalle b.zona{font-size:16px;padding:1px 10px}
 /* ---------- móvil ---------- */
 @media(max-width:700px){
   body{font-size:15px;padding-bottom:calc(72px + env(safe-area-inset-bottom))}
