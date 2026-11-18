@@ -14,6 +14,8 @@ main{max-width:1000px;margin:20px auto;padding:0 16px}
 .row{display:flex;gap:12px;flex-wrap:wrap}
 .row>*{flex:1;min-width:150px}
 label{display:block;font-size:13px;color:var(--mut);margin-bottom:10px}
+textarea{width:100%;padding:10px 12px;border:1px solid var(--bd);border-radius:9px;background:var(--bg);color:var(--tx);font:inherit;font-size:16px;margin-top:5px;resize:vertical;min-height:70px;transition:border-color .15s,box-shadow .15s}
+textarea:focus{box-shadow:0 0 0 3px rgba(59,91,219,.2);outline:none;border-color:var(--pri)}
 input,select{width:100%;padding:8px 10px;border:1px solid var(--bd);border-radius:6px;background:var(--bg);color:var(--tx);font:inherit;margin-top:3px}
 button.btn{background:var(--pri);color:#fff;border:0;padding:8px 14px;border-radius:6px;cursor:pointer;font:inherit}
 button.btn:hover{background:var(--pri2)}

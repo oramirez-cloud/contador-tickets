@@ -76,7 +76,7 @@ setInterval(async () => {
   try {
     if (modalAbierto()) return;
     const a = document.activeElement;
-    if (a && /INPUT|SELECT/.test(a.tagName) && a.type !== 'file') return; // no interrumpir mientras escribe
+    if (a && /INPUT|SELECT|TEXTAREA/.test(a.tagName) && a.type !== 'file') return; // no interrumpir mientras escribe
     if (await sync()) render();
   } catch (e) { }
 }, 8000);
@@ -277,7 +277,7 @@ function abrirVenta(id) {
       <div class="row"><label>Cantidad<input id="vq" type="number" min="1" value="1" oninput="calcVenta()"></label>
       <label>Precio de venta (por boleto)<input id="vp" type="number" min="0" step="0.01" placeholder="0.00" oninput="calcVenta()"></label></div>
       <label>Fecha de venta<input id="vf" type="datetime-local" value="${nowLocal()}"></label>
-      <label>Comentarios (opcional)<input id="vc" placeholder="Vendido a…"></label>
+      <label>Vendido a / comentarios (opcional)<textarea id="vc" rows="3" placeholder="Vendido a…"></textarea></label>
       <label>PDF (opcional)<input id="vpdf" type="file" accept="application/pdf"></label>
       <div id="vtot" class="vtot"></div>
     </div>
