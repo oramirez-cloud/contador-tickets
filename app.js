@@ -153,7 +153,7 @@ function render() {
   if (!db.usuarios.length) return renderPrimerAdmin();
   if (!user) return renderLogin();
   const admin = user.rol === 'admin';
-  const tabs = admin ? [['inventario', 'Boletos'], ['ventas', 'Ventas'], ['usuarios', 'Usuarios'], ['datos', 'Datos']] : [['ventas', 'Ventas']];
+  const tabs = admin ? [['inventario', 'Boletos'], ['ventas', 'Ventas'], ['usuarios', 'Usuarios']] : [['ventas', 'Ventas']];
   if (!tabs.some(t => t[0] === tab)) tab = tabs[0][0]; // el rol usuario solo ve Ventas
   $app.innerHTML = `<header><h1>🎟️ Control de Boletos</h1>
     <nav>${tabs.map(([k, l]) => `<button class="${tab === k ? 'on' : ''}" onclick="go('${k}')">${l}</button>`).join('')}</nav>
