@@ -116,7 +116,7 @@ async function afterLoad() {
 function renderSetup(modo) {
   const hoja = `<h2>Conectar Google Sheets</h2>
   <p class="mut">Datos compartidos entre varias personas. Pega la URL de la aplicación web (termina en /exec) y la clave que pusiste en el script.</p>
-  <label>URL del script<input id="hu" placeholder="https://script.google.com/macros/s/.../exec"></label>
+  <label>URL del script<input id="hu" value="${esc(typeof CONFIG !== 'undefined' ? CONFIG.url : '')}" placeholder="https://script.google.com/macros/s/.../exec"></label>
   <label>Clave<input id="hk" type="password"></label>
   <button class="btn" onclick="conectarHoja()">Conectar</button>`;
   $app.innerHTML = `<div class="card login" style="max-width:460px">${hoja}

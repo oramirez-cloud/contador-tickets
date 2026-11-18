@@ -6,6 +6,7 @@ const Store = (() => {
   const LS = 'boletos.datos.v2', LSH = 'boletos.hoja', DB = 'boletos-handles';
   let dir = null, hoja = null;
   try { hoja = JSON.parse(localStorage.getItem(LSH)); } catch (e) { }
+  if (typeof CONFIG !== 'undefined' && CONFIG.url && CONFIG.clave) hoja = { url: CONFIG.url, clave: CONFIG.clave }; // config.js manda
   const empty = () => ({ version: 2, usuarios: [], lotes: [], ventas: [] });
 
   // text/plain evita el preflight CORS que Apps Script no soporta
