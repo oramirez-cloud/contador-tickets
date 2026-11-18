@@ -30,61 +30,45 @@ let tab = 'inventario';
 const lote = id => db.lotes.find(l => l.id === id);
 const lotesVivos = () => db.lotes.filter(l => !l.borrado);
 
-// ---------- multiusuario: varias personas sobre la misma carpeta compartida ----------
-// Cada registro lleva "mod" (marca de tiempo). Al guardar se relee el archivo, se combinan
-// los cambios de ambos por registro (gana el más reciente) y recién entonces se escribe.
+// ---------- datos en tiempo real (Firebase / Firestore) ----------
+// Cada registro es un documento. Store.iniciar() mantiene "db" sincronizada: cuando la otra
+// persona guarda algo, llega aquí sola y la pantalla se refresca.
 const colecciones = ['usuarios', 'lotes', 'ventas', 'apartados', 'abonos'];
-let snap = new Map(), ultimoMod = 0;
+let snap = new Map(), pendiente = false;
 function tomaSnap() { snap = new Map(); for (const c of colecciones) for (const r of db[c]) snap.set(r.id, JSON.stringify(r)); }
-function merge(local, remoto) {
-  const out = Store.empty();
-  for (const c of colecciones) {
-    const m = new Map((remoto?.[c] || []).map(r => [r.id, r]));
-    for (const r of local[c] || []) { const o = m.get(r.id); if (!o || (r.mod || 0) >= (o.mod || 0)) m.set(r.id, r); }
-    out[c] = [...m.values()];
+
+// Aplica a "db" los cambios que llegan de la base (o de localStorage al arrancar)
+function aplicar(c, cambios, local) {
+  if (local) return; // eco de mis propias escrituras: ya están en memoria
+  for (const { tipo, r } of cambios) {
+    const i = db[c].findIndex(x => x.id === r.id);
+    if (tipo === 'removed') { if (i >= 0) db[c].splice(i, 1); snap.delete(r.id); continue; }
+    if (i >= 0) db[c][i] = r; else db[c].push(r);
+    snap.set(r.id, JSON.stringify(r));
   }
-  return out;
+  if (user) user = db.usuarios.find(u => u.id === user.id && u.activo) || null;
+  pendiente = true;
 }
-async function save() {
-  return conCarga('Guardando…', _save);
-}
+setInterval(() => {
+  if (!pendiente || modalAbierto()) return;
+  const a = document.activeElement;
+  if (a && /INPUT|SELECT|TEXTAREA/.test(a.tagName) && a.type !== 'file') return; // no interrumpir mientras escribe
+  pendiente = false; render();
+}, 1500);
+
+// Guarda solo los registros que cambiaron
+async function save() { return conCarga('Guardando…', _save); }
 async function _save() {
   try {
-    for (const c of colecciones) for (const r of db[c]) if (snap.get(r.id) !== JSON.stringify(r)) r.mod = Date.now();
-    if (Store.compartido()) {
-      const remoto = await Store.leerDisco();
-      if (remoto) db = merge(db, remoto);
+    const cambios = [];
+    for (const c of colecciones) for (const r of db[c]) {
+      if (snap.get(r.id) !== JSON.stringify(r)) { r.mod = Date.now(); cambios.push({ c, r }); }
     }
-    const merged = await Store.guardar(db);
-    if (Store.modo() === 'hoja' && merged) {
-      if (merged.apartados === undefined && (db.apartados.length || db.abonos.length)) toast('Actualiza el script de Google (Code.gs) para guardar apartados');
-      for (const c of colecciones) if (!merged[c]) merged[c] = db[c];
-      db = merged;
-    }
+    if (cambios.length) await Store.guardar(cambios, db);
     tomaSnap();
-    if (Store.compartido()) ultimoMod = await Store.modificado();
-    if (user) user = db.usuarios.find(u => u.id === user.id) || user;
   } catch (e) { toast('Error al guardar: ' + e.message); }
 }
-// Trae cambios hechos por la otra persona. true si había algo nuevo.
-async function sync() {
-  if (!Store.compartido()) return false;
-  const m = await Store.modificado();
-  if (m === ultimoMod) return false;
-  const remoto = await Store.leerDisco();
-  if (remoto) { db = merge(db, remoto); tomaSnap(); }
-  ultimoMod = m;
-  if (user) user = db.usuarios.find(u => u.id === user.id && u.activo) || null;
-  return true;
-}
-setInterval(async () => {
-  try {
-    if (modalAbierto()) return;
-    const a = document.activeElement;
-    if (a && /INPUT|SELECT|TEXTAREA/.test(a.tagName) && a.type !== 'file') return; // no interrumpir mientras escribe
-    if (await sync()) render();
-  } catch (e) { }
-}, 8000);
+const sync = async () => { }; // los datos ya llegan en tiempo real; se conserva por compatibilidad
 const vendidos = id => db.ventas.filter(v => v.loteId === id && !v.anulada).reduce((a, v) => a + v.cantidad, 0);
 const apartadosActivos = id => db.apartados.filter(a => a.loteId === id && a.estado === 'activo').reduce((t, a) => t + a.cantidad, 0);
 const disponibles = id => lote(id).cantidad - vendidos(id) - apartadosActivos(id);
@@ -96,66 +80,41 @@ const nombreUser = id => db.usuarios.find(u => u.id === id)?.nombre ?? '—';
 async function guardarArchivoPdf(inputId, prefijo) {
   const f = document.getElementById(inputId)?.files[0];
   if (!f) return null;
-  if (!Store.compartido()) { toast('El PDF solo se guarda si conectas una hoja o carpeta (pestaña Datos)'); return null; }
-  try { return await Store.guardarPdf(`${prefijo}_${Date.now()}_${f.name.replace(/[^\w.\-]+/g, '_')}`, f); }
+  try { return await conCarga('Subiendo PDF…', () => Store.guardarPdf(f.name, f)); }
   catch (e) { toast('No se pudo guardar el PDF: ' + e.message); return null; }
 }
-async function verPdf(ruta) {
-  if (/^https?:/.test(ruta)) return void window.open(ruta, '_blank');
+async function verPdf(id) {
+  if (/^https?:/.test(id)) return void window.open(id, '_blank'); // PDFs antiguos (Drive)
+  const w = window.open('', '_blank'); // se abre antes del await para que no lo bloquee el navegador
   try {
-    const url = URL.createObjectURL(await Store.abrirPdf(ruta));
-    window.open(url, '_blank'); setTimeout(() => URL.revokeObjectURL(url), 60000);
-  } catch (e) { toast('No se encontró el PDF en la carpeta'); }
+    const url = URL.createObjectURL(await conCarga('Abriendo PDF…', () => Store.abrirPdf(id)));
+    if (w) w.location = url; else window.open(url, '_blank');
+    setTimeout(() => URL.revokeObjectURL(url), 120000);
+  } catch (e) { if (w) w.close(); toast('No se pudo abrir el PDF: ' + e.message); }
 }
 const pdfBtn = r => r ? `<button class="sec" onclick="verPdf('${esc(r)}')">PDF</button>` : '';
 
 // ---------- arranque ----------
 async function boot() {
-  const r = await Store.recordada();
-  if (r === 'ok') { db = await conCarga('Cargando datos…', () => Store.cargar()).catch(e => { toast('No se pudo cargar: ' + e.message); return Store.empty(); }); return afterLoad(); }
-  if (r === 'permiso') return renderSetup('reconectar');
-  if (localStorage.getItem('boletos.datos.v2')) { db = await Store.cargar(); return afterLoad(); }
-  renderSetup('nuevo');
-}
-async function afterLoad() {
-  tomaSnap(); if (Store.compartido()) ultimoMod = await Store.modificado();
+  try {
+    await conCarga('Cargando datos…', () => Store.iniciar(aplicar));
+  } catch (e) { return renderError(e); }
+  if (!db.usuarios.length) { // primer arranque: usuario administrador por defecto (id y sal fijos para que dos arranques simultáneos no dupliquen)
+    const salt = 'semilla-admin-inicial';
+    db.usuarios.push({ id: 'admin-inicial', nombre: 'Oscar Ramirez', usuario: 'admin', rol: 'admin', salt, hash: await hash(salt, '12345678'), activo: true });
+    await save();
+  }
   const u = sessionStorage.getItem('sesion');
-  user = u ? db.usuarios.find(x => x.id === u && x.activo) : null;
+  user = u ? db.usuarios.find(x => x.id === u && x.activo) || null : null;
+  pendiente = false;
   render();
 }
-function renderSetup(modo) {
-  const hoja = `<h2>Conectar Google Sheets</h2>
-  <p class="mut">Datos compartidos entre varias personas. Pega la URL de la aplicación web (termina en /exec) y la clave que pusiste en el script.</p>
-  <label>URL del script<input id="hu" value="${esc(typeof CONFIG !== 'undefined' ? CONFIG.url : '')}" placeholder="https://script.google.com/macros/s/.../exec"></label>
-  <label>Clave<input id="hk" type="password"></label>
-  <button class="btn" onclick="conectarHoja()">Conectar</button>`;
-  $app.innerHTML = `<div class="card login" style="max-width:460px">${hoja}
-  <hr style="border:0;border-top:1px solid var(--bd);margin:18px 0">
-  <h2>Otras opciones</h2>
-  ${modo === 'reconectar'
-      ? `<button class="btn" onclick="reconectar()">Reconectar carpeta "${esc(Store.nombreCarpeta())}"</button> `
-      : ''}
-  ${Store.soportaCarpeta() ? '<button class="sec" onclick="elegirCarpeta()">Usar una carpeta (datos.json)</button> ' : ''}
-  <button class="sec" onclick="soloNavegador()">Solo este navegador</button></div>`;
+function renderError(e) {
+  $app.innerHTML = `<div class="card login"><h2>No se pudo conectar</h2>
+  <p class="mut">${esc(e.message || e)}</p>
+  <p class="mut">Revisa que Firestore esté creado en tu proyecto de Firebase y que las reglas permitan leer y escribir.</p>
+  <button class="btn" onclick="location.reload()">Reintentar</button></div>`;
 }
-async function conectarHoja() {
-  try {
-    const u = val('hu'), k = document.getElementById('hk').value;
-    const d = await conCarga('Conectando…', async () => { await Store.conectarHoja(u, k); return Store.cargar(); });
-    if (d.usuarios.length || !db.usuarios.length) db = d; else await save();
-    afterLoad();
-  } catch (e) { toast(e.message); }
-}
-async function reconectar() { try { await Store.reconectar(); db = await Store.cargar(); afterLoad(); } catch (e) { toast(e.message); } }
-async function elegirCarpeta() {
-  try {
-    await Store.elegirCarpeta();
-    const d = await Store.cargar();
-    if (d.usuarios.length || !db.usuarios.length) db = d; else await save();
-    afterLoad();
-  } catch (e) { if (e.name !== 'AbortError') toast(e.message); }
-}
-async function soloNavegador() { Store.usarNavegador(); db = await Store.cargar(); afterLoad(); }
 
 // ---------- render raíz ----------
 function render() {
@@ -168,7 +127,7 @@ function render() {
     <nav>${tabs.map(([k, l]) => `<button class="${tab === k ? 'on' : ''}" onclick="go('${k}')">${l}</button>`).join('')}</nav>
     <span class="mut">${esc(user.nombre)} (${user.rol})</span><button class="sec" onclick="logout()">Salir</button></header>
     <main id="view"></main>`;
-  ({ inventario: vInventario, ventas: vVentas, apartados: vApartados, usuarios: vUsuarios, datos: vDatos })[tab]();
+  ({ inventario: vInventario, ventas: vVentas, apartados: vApartados, usuarios: vUsuarios })[tab]();
 }
 const go = t => { tab = t; filtroInv = ''; render(); };
 
@@ -189,7 +148,6 @@ function renderLogin() {
   <button class="btn" onclick="login()">Entrar</button></div>`;
 }
 async function login() {
-  if (Store.compartido()) await conCarga('Entrando…', async () => { await sync().catch(() => { }); });
   const u = db.usuarios.find(x => x.usuario.toLowerCase() === val('u').toLowerCase() && x.activo);
   if (!u || u.hash !== await hash(u.salt, document.getElementById('p').value)) return toast('Usuario o contraseña incorrectos');
   user = u; sessionStorage.setItem('sesion', u.id); tab = u.rol === 'admin' ? 'inventario' : 'ventas'; render();
@@ -485,26 +443,6 @@ async function toggleUsuario(id) { const u = db.usuarios.find(x => x.id === id);
 async function resetPass(id) {
   const p = prompt('Nueva contraseña:'); if (!p) return;
   const u = db.usuarios.find(x => x.id === id); u.salt = uid(); u.hash = await hash(u.salt, p); await save(); toast('Contraseña actualizada');
-}
-
-// ---------- datos ----------
-function vDatos() {
-  document.getElementById('view').innerHTML = `<div class="card"><h2>Almacenamiento</h2>
-  <p>Modo actual: <b>${Store.modo() === 'hoja' ? 'Google Sheets (datos y PDFs en tu Drive)' : Store.modo() === 'carpeta' ? 'Carpeta "' + esc(Store.nombreCarpeta()) + '" (datos.json + pdfs/)' : 'Solo navegador (localStorage, sin PDFs)'}</b></p>
-  <button class="sec" onclick="renderSetup()">Cambiar almacenamiento</button> 
-  ${Store.soportaCarpeta() ? '<button class="sec" onclick="elegirCarpeta()">Cambiar / elegir carpeta</button>' : '<p class="mut">Tu navegador no permite elegir carpeta; usa Chrome o Edge para guardar en archivos.</p>'}</div>
-  <div class="card"><h2>Respaldo</h2>
-  <button class="sec" onclick="exportar()">Exportar datos.json</button>
-  ${user.rol === 'admin' ? ' <label style="display:inline-block;margin:0 0 0 8px"><span class="sec" style="padding:6px 10px;border:1px solid var(--bd);border-radius:6px;cursor:pointer">Importar y combinar<input type="file" accept=".json" hidden onchange="importar(this.files[0])"></span></label>' : ''}</div>`;
-}
-const exportar = () => Store.descargar('datos.json', new Blob([JSON.stringify(db, null, 2)], { type: 'application/json' }));
-async function importar(f) {
-  if (!f || !confirm('Esto se combina con los datos actuales. ¿Continuar?')) return;
-  try {
-    const d = JSON.parse(await f.text());
-    if (!Array.isArray(d.usuarios) || !Array.isArray(d.lotes) || !Array.isArray(d.ventas)) throw new Error('Formato inválido');
-    db = d; for (const c of colecciones) db[c].forEach(r => r.mod = Date.now()); await save(); logout(); toast('Datos importados y combinados, inicia sesión');
-  } catch (e) { toast(e.message); }
 }
 
 boot();

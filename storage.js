@@ -1,113 +1,76 @@
-// Persistencia lado cliente. Tres modos:
-//  - 'hoja'      : Google Sheets vía Apps Script (compartido entre varias personas, sin carpeta)
-//  - 'carpeta'   : datos.json + pdfs/ en una carpeta (Chrome/Edge)
-//  - 'navegador' : localStorage (solo ese navegador)
+// Persistencia: Firebase Firestore (compartido, en tiempo real).
+// Si no hay configuración de Firebase, cae a localStorage (solo ese navegador, sin PDFs).
+// Los usuarios son una colección más: NO se usa Firebase Auth.
 const Store = (() => {
-  const LS = 'boletos.datos.v2', LSH = 'boletos.hoja', DB = 'boletos-handles';
-  let dir = null, hoja = null;
-  try { hoja = JSON.parse(localStorage.getItem(LSH)); } catch (e) { }
-  if (typeof CONFIG !== 'undefined' && CONFIG.url && CONFIG.clave) hoja = { url: CONFIG.url, clave: CONFIG.clave }; // config.js manda
-  const empty = () => ({ version: 2, usuarios: [], lotes: [], ventas: [], apartados: [], abonos: [] });
+  const LS = 'boletos.datos.v3';
+  const COLS = ['usuarios', 'lotes', 'ventas', 'apartados', 'abonos'];
+  const CHUNK = 700000;            // caracteres base64 por documento (Firestore: máx. 1 MiB por documento)
+  const MAX_PDF = 5 * 1024 * 1024; // 5 MB por PDF
+  const empty = () => ({ version: 3, usuarios: [], lotes: [], ventas: [], apartados: [], abonos: [] });
 
-  // text/plain evita el preflight CORS que Apps Script no soporta
-  async function llamar(accion, extra = {}) {
-    const r = await fetch(hoja.url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ clave: hoja.clave, accion, ...extra }) });
-    const j = await r.json();
-    if (j.error) throw new Error(j.error);
-    return j;
+  let fs = null;
+  if (typeof firebase !== 'undefined' && typeof FIREBASE_CONFIG !== 'undefined' && FIREBASE_CONFIG.projectId) {
+    firebase.initializeApp(FIREBASE_CONFIG);
+    fs = firebase.firestore();
+    fs.settings({ ignoreUndefinedProperties: true });
   }
-  const b64 = blob => new Promise((res, rej) => { const f = new FileReader(); f.onload = () => res(f.result.split(',')[1]); f.onerror = rej; f.readAsDataURL(blob); });
 
-  const idb = () => new Promise((res, rej) => {
-    const r = indexedDB.open(DB, 1);
-    r.onupgradeneeded = () => r.result.createObjectStore('h');
-    r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
-  });
-  const idbGet = async k => { const d = await idb(); return new Promise(r => { const q = d.transaction('h').objectStore('h').get(k); q.onsuccess = () => r(q.result); q.onerror = () => r(null); }); };
-  const idbSet = async (k, v) => { const d = await idb(); return new Promise(r => { const t = d.transaction('h', 'readwrite'); t.objectStore('h').put(v, k); t.oncomplete = r; }); };
-
-  async function readJson() {
-    try { return JSON.parse(await (await (await dir.getFileHandle('datos.json')).getFile()).text()); }
-    catch (e) { return null; }
-  }
+  const conTiempo = (p, ms, msg) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error(msg)), ms))]);
+  const aB64 = blob => new Promise((res, rej) => { const f = new FileReader(); f.onload = () => res(f.result.split(',')[1]); f.onerror = rej; f.readAsDataURL(blob); });
 
   return {
-    soportaCarpeta: () => 'showDirectoryPicker' in window,
-    modo: () => (hoja ? 'hoja' : dir ? 'carpeta' : 'navegador'),
-    compartido() { return this.modo() !== 'navegador'; },
-    nombreCarpeta: () => (hoja ? 'Google Sheets' : dir?.name),
+    modo: () => (fs ? 'firebase' : 'navegador'),
+    empty,
 
-    // Devuelve 'ok' | 'permiso' | 'ninguna'
-    async recordada() {
-      if (hoja) return 'ok';
-      if (!this.soportaCarpeta()) return 'ninguna';
-      const h = await idbGet('dir');
-      if (!h) return 'ninguna';
-      dir = h;
-      if ((await h.queryPermission({ mode: 'readwrite' })) === 'granted') return 'ok';
-      return 'permiso';
-    },
-    async reconectar() {
-      if ((await dir.requestPermission({ mode: 'readwrite' })) !== 'granted') throw new Error('Permiso denegado');
-    },
-    async elegirCarpeta() {
-      dir = await window.showDirectoryPicker({ mode: 'readwrite', id: 'boletos' });
-      hoja = null; localStorage.removeItem(LSH);
-      await idbSet('dir', dir);
-    },
-    async conectarHoja(url, clave) {
-      const prev = hoja;
-      hoja = { url, clave };
-      try { await llamar('version'); } catch (e) { hoja = prev; throw new Error('No se pudo conectar: ' + e.message); }
-      localStorage.setItem(LSH, JSON.stringify(hoja)); dir = null;
-    },
-    usarNavegador() { dir = null; hoja = null; localStorage.removeItem(LSH); },
-
-    async cargar() {
-      let d = null;
-      if (hoja) d = (await llamar('leer')).data;
-      else if (dir) d = await readJson();
-      else { try { d = JSON.parse(localStorage.getItem(LS)); } catch (e) { } }
-      return Object.assign(empty(), d || {}); // asegura arreglos nuevos en datos viejos
-    },
-    // En modo hoja devuelve los datos ya combinados por el servidor
-    async guardar(data) {
-      const s = JSON.stringify(data, null, 2);
-      try { localStorage.setItem(LS, s); } catch (e) { }
-      if (hoja) return (await llamar('guardar', { data })).data;
-      if (dir) {
-        const w = await (await dir.getFileHandle('datos.json', { create: true })).createWritable();
-        await w.write(s); await w.close();
+    // Carga inicial + escucha en tiempo real. onCambio(coleccion, [{tipo, r}], esEcoLocal)
+    iniciar(onCambio) {
+      if (!fs) {
+        let d = empty(); try { d = Object.assign(d, JSON.parse(localStorage.getItem(LS)) || {}); } catch (e) { }
+        COLS.forEach(c => onCambio(c, d[c].map(r => ({ tipo: 'added', r })), false));
+        return Promise.resolve();
       }
-      return data;
-    },
-    async leerDisco() {
-      if (hoja) return (await llamar('leer')).data;
-      return dir ? readJson() : null;
-    },
-    async modificado() {
-      if (hoja) return (await llamar('version')).v;
-      try { return (await (await dir.getFileHandle('datos.json')).getFile()).lastModified; } catch (e) { return 0; }
+      return conTiempo(new Promise((resolve, reject) => {
+        const faltan = new Set(COLS);
+        COLS.forEach(c => fs.collection(c).onSnapshot(snap => {
+          const ch = snap.docChanges().map(x => ({ tipo: x.type, r: x.doc.data() }));
+          onCambio(c, ch, snap.metadata.hasPendingWrites);
+          if (faltan.delete(c) && !faltan.size) resolve();
+        }, err => reject(err)));
+      }), 20000, 'Tiempo de espera agotado. Revisa tu conexión y que Firestore esté creado.');
     },
 
-    // Devuelve ruta (carpeta) o URL de Drive (hoja); null si no hay dónde guardar
-    async guardarPdf(nombre, blob) {
-      if (hoja) return (await llamar('pdf', { nombre, base64: await b64(blob) })).url;
-      if (!dir) return null;
-      const sub = await dir.getDirectoryHandle('pdfs', { create: true });
-      const w = await (await sub.getFileHandle(nombre, { create: true })).createWritable();
-      await w.write(blob); await w.close();
-      return 'pdfs/' + nombre;
+    // cambios: [{c, r}] (solo lo modificado); data: estado completo (para localStorage)
+    async guardar(cambios, data) {
+      if (!fs) { try { localStorage.setItem(LS, JSON.stringify(data)); } catch (e) { } return; }
+      for (let i = 0; i < cambios.length; i += 400) {
+        const b = fs.batch();
+        cambios.slice(i, i + 400).forEach(({ c, r }) => b.set(fs.collection(c).doc(r.id), r));
+        await conTiempo(b.commit(), 15000, 'Sin conexión: no se pudo guardar. Intenta de nuevo.');
+      }
     },
-    async abrirPdf(ruta) {
-      const sub = await dir.getDirectoryHandle('pdfs');
-      return (await (await sub.getFileHandle(ruta.replace('pdfs/', ''))).getFile());
+
+    // PDFs como base64, partidos en trozos dentro de la colección "pdfs". Devuelve el id.
+    async guardarPdf(nombre, file) {
+      if (!fs) throw new Error('Los PDFs requieren Firebase');
+      if (file.size > MAX_PDF) throw new Error('El PDF pesa más de 5 MB');
+      const b64 = await aB64(file), id = (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36)), n = Math.max(1, Math.ceil(b64.length / CHUNK));
+      for (let i = 0; i < n; i += 4) {
+        const b = fs.batch();
+        for (let j = i; j < Math.min(n, i + 4); j++) b.set(fs.collection('pdfs').doc(id + '_' + j), { pdf: id, i: j, data: b64.slice(j * CHUNK, (j + 1) * CHUNK) });
+        await conTiempo(b.commit(), 60000, 'Sin conexión: no se pudo subir el PDF.');
+      }
+      await conTiempo(fs.collection('pdfs').doc(id).set({ id, nombre, partes: n, tam: file.size, fecha: Date.now() }), 15000, 'Sin conexión: no se pudo subir el PDF.');
+      return id;
     },
-    descargar(nombre, blob) {
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob); a.download = nombre; a.click();
-      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-    },
-    empty
+    async abrirPdf(id) {
+      if (!fs) throw new Error('Los PDFs requieren Firebase');
+      const meta = await fs.collection('pdfs').doc(id).get();
+      if (!meta.exists) throw new Error('El PDF no existe');
+      const partes = await Promise.all(Array.from({ length: meta.data().partes }, (_, i) => fs.collection('pdfs').doc(id + '_' + i).get()));
+      const bin = atob(partes.map(p => p.data().data).join(''));
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      return new Blob([bytes], { type: 'application/pdf' });
+    }
   };
 })();
