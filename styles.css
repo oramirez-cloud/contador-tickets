@@ -137,3 +137,6 @@ button.sm{padding:7px 14px;min-height:36px}
   td.acts button{flex:1;min-height:42px}
 }
 .pdfactual{margin:0 0 12px}
+
+.detalle .full{grid-column:1/-1}
+.detalle b.coment{font-size:14px;font-weight:500;white-space:pre-line}

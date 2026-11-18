@@ -213,17 +213,18 @@ function vInventario(edit) {
   <label>Precio sugerido de venta<input id="ls" type="number" min="0" step="0.01" value="${l.sugerido ?? ''}"></label>
   <label>Fecha de ingreso<input id="lf" type="datetime-local" value="${esc(l.fecha || nowLocal())}"></label>
   <label>${edit && l.pdf ? 'Reemplazar PDF (opcional)' : 'PDF de los boletos (opcional)'}<input id="lp" type="file" accept="application/pdf"></label></div>
+  <label>Comentarios (opcional)<textarea id="lcm" rows="2" placeholder="Notas sobre este ingreso…">${esc(l.comentarios)}</textarea></label>
   ${edit && l.pdf ? `<p class="pdfactual">PDF actual: ${pdfBtn(l.pdf)} <label style="display:inline;margin-left:10px"><input id="lpq" type="checkbox" style="width:auto;margin-right:6px">Quitar PDF</label></p>` : ''}
   <button class="btn" onclick="guardarLote('${edit || ''}')">Guardar</button> ${edit ? '<button class="sec" onclick="vInventario()">Cancelar</button>' : ''}</div>
-  <div class="card"><div class="head"><h2>Inventario</h2><input id="filtro" class="filtro" type="search" placeholder="Filtrar por artista o zona…" value="${esc(filtroInv)}" oninput="filtrarInv()"></div><table><tr><th>Artista</th><th>Zona</th><th>Disp.</th><th>Costo</th><th>Sugerido</th><th>Ingreso</th><th></th></tr>
-  ${[...lotesVivos()].reverse().map(x => `<tr class="inv" data-t="${esc((x.artista + ' ' + x.zona).toLowerCase())}"><td>${esc(x.artista)}</td><td><span class="zona">${esc(x.zona)}</span></td><td>${disponibles(x.id)} / ${x.cantidad}</td><td>${money(x.costo)}</td><td>${money(x.sugerido)}</td>
+  <div class="card"><div class="head"><h2>Inventario</h2><input id="filtro" class="filtro" type="search" placeholder="Filtrar por artista o zona…" value="${esc(filtroInv)}" oninput="filtrarInv()"></div><table><tr><th>Artista</th><th>Zona</th><th>Disp.</th><th>Costo</th><th>Sugerido</th><th>Comentarios</th><th>Ingreso</th><th></th></tr>
+  ${[...lotesVivos()].reverse().map(x => `<tr class="inv" data-t="${esc((x.artista + ' ' + x.zona).toLowerCase())}"><td>${esc(x.artista)}</td><td><span class="zona">${esc(x.zona)}</span></td><td>${disponibles(x.id)} / ${x.cantidad}</td><td>${money(x.costo)}</td><td>${money(x.sugerido)}</td><td>${esc(x.comentarios)}</td>
   <td>${fdate(x.fecha)}<br><span class="mut">${esc(nombreUser(x.usuarioId))}</span></td>
   <td class="acts">${pdfBtn(x.pdf)} <button class="sec" onclick="vInventario('${x.id}')">Editar</button>
-  <button class="sec danger" onclick="borrarLote('${x.id}')">Borrar</button></td></tr>`).join('') || '<tr><td colspan="7" class="mut">Sin boletos ingresados</td></tr>'}</table><p id="sinres" class="mut" hidden>Sin resultados para el filtro.</p></div>`;
+  <button class="sec danger" onclick="borrarLote('${x.id}')">Borrar</button></td></tr>`).join('') || '<tr><td colspan="8" class="mut">Sin boletos ingresados</td></tr>'}</table><p id="sinres" class="mut" hidden>Sin resultados para el filtro.</p></div>`;
   filtrarInv();
 }
 async function guardarLote(id) {
-  const o = { artista: val('la'), zona: val('lz'), cantidad: parseInt(val('lc')), costo: parseFloat(val('lk')), sugerido: parseFloat(val('ls')), fecha: val('lf') || nowLocal() };
+  const o = { artista: val('la'), zona: val('lz'), cantidad: parseInt(val('lc')), costo: parseFloat(val('lk')), sugerido: parseFloat(val('ls')), fecha: val('lf') || nowLocal(), comentarios: val('lcm') };
   if (!o.artista || !o.zona || !(o.cantidad > 0) || isNaN(o.costo) || isNaN(o.sugerido)) return toast('Completa artista, zona, cantidad, costo y precio sugerido');
   if (id && o.cantidad < vendidos(id)) return toast('La cantidad no puede ser menor a lo ya vendido (' + vendidos(id) + ')');
   const pdf = await guardarArchivoPdf('lp', 'ingreso');
@@ -293,7 +294,7 @@ function detalleVenta() {
   if (!id) { d.innerHTML = ''; f.hidden = true; return; }
   const l = lote(id), n = disponibles(id);
   d.innerHTML = `<div class="detalle"><div><span>Artista</span><b>${esc(l.artista)}</b></div><div><span>Zona</span><b class="zona">${esc(l.zona)}</b></div>
-    <div><span>Disponibles</span><b>${n}</b></div><div><span>Precio sugerido</span><b class="sug">${money(l.sugerido)}</b></div></div>`;
+    <div><span>Disponibles</span><b>${n}</b></div><div><span>Precio sugerido</span><b class="sug">${money(l.sugerido)}</b></div>${l.comentarios ? `<div class="full"><span>Comentarios</span><b class="coment">${esc(l.comentarios)}</b></div>` : ''}</div>`;
   document.getElementById('vq').max = n; f.hidden = false; calcVenta();
 }
 function calcVenta() {
